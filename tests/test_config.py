@@ -59,6 +59,14 @@ class TestValidate:
         with pytest.raises(ValueError, match="start_time must not be later"):
             cfg.validate()
 
+    def test_equal_start_and_end_does_not_raise(self):
+        """start_time equal to end_time is a valid (if narrow) time range."""
+        cfg = LogSliceConfig(
+            start_time=datetime(2024, 6, 1),
+            end_time=datetime(2024, 6, 1),
+        )
+        cfg.validate()  # should not raise
+
     def test_zero_max_lines_raises(self):
         cfg = LogSliceConfig(max_lines=0)
         with pytest.raises(ValueError, match="max_lines must be a positive integer"):
