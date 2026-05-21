@@ -1,64 +1,115 @@
-"""Output formatting utilities for logslice."""
+"""Output formatting for log lines and summaries."""
+
+from __future__ import annotations
 
 import json
-from typing import List, Optional, Tuple
-from datetime import datetime
+from typing import Iterable, Iterator, Optional
 
 
-def format_line_plain(line: str, line_number: Optional[int] = None) -> str:
-    """Return the line as-is, optionally prefixed with line number."""
+def format_line_plain(
+    line: str,
+    line_number: Optional[int] = None,
+) -> str:
+    """Return a plain-text representation of a log line.
+
+    Args:
+        line: The raw log line (trailing newline stripped).
+        line_number: Optional 1-based line number to prepend.
+
+    Returns:
+        Formatted string ready for output.
+    """
+    line = line.rstrip("\n")
     if line_number is not None:
-        return f"{line_number}:{line}"
+        return f"{line_number:>6}: {line}"
     return line
 
 
 def format_line_json(
     line: str,
     line_number: Optional[int] = None,
-    timestamp: Optional[datetime] = None,
+    extra: Optional[dict] = None,
 ) -> str:
-    """Return a JSON-encoded representation of a log line."""
-    record = {"line": line.rstrip("\n")}
+    """Return a JSON-encoded representation of a log line.
+
+    Args:
+        line: The raw log line.
+        line_number: Optional 1-based line number.
+        extra: Optional mapping of additional fields to include.
+
+    Returns:
+        JSON string.
+    """
+    payload: dict = {"line": line.rstrip("\n")}
     if line_number is not None:
-        record["lineno"] = line_number
-    if timestamp is not None:
-        record["timestamp"] = timestamp.isoformat()
-    return json.dumps(record)
+        payload["n"] = line_number
+    if extra:
+        payload.update(extra)
+    return json.dumps(payload, ensure_ascii=False)
 
 
-def format_summary(matched: int, total: int, elapsed: Optional[float] = None) -> str:
-    """Return a human-readable summary string."""
-    parts = [f"Matched {matched} of {total} lines"]
-    if elapsed is not None:
-        parts.append(f"in {elapsed:.3f}s")
-    return " ".join(parts) + "."
+def format_summary(
+    total: int,
+    matched: int,
+    label: str = "matched",
+) -> str:
+    """Return a human-readable summary line.
+
+    Args:
+        total: Total lines processed.
+        matched: Lines that passed all filters.
+        label: Verb to use in the summary (default: 'matched').
+
+    Returns:
+        Summary string.
+    """
+    pct = (matched / total * 100) if total else 0.0
+    return f"{matched}/{total} lines {label} ({pct:.1f}%)"
+
+
+def format_aggregation(
+    aggregated: dict[str, int],
+    title: str = "Aggregation",
+) -> str:
+    """Return a formatted table of aggregation results.
+
+    Args:
+        aggregated: Mapping of bucket label -> count.
+        title: Header label for the table.
+
+    Returns:
+        Multi-line string table.
+    """
+    if not aggregated:
+        return f"{title}\n  (no data)"
+
+    max_key = max(len(k) for k in aggregated)
+    max_val = max(len(str(v)) for v in aggregated.values())
+    header = f"{title}"
+    sep = "-" * (max_key + max_val + 5)
+    rows = [header, sep]
+    for key, count in aggregated.items():
+        rows.append(f"  {key:<{max_key}}  {count:>{max_val}d}")
+    return "\n".join(rows)
 
 
 def format_lines(
-    lines: List[Tuple[int, str]],
+    lines: Iterable[str],
     fmt: str = "plain",
-    timestamps: Optional[List[Optional[datetime]]] = None,
-    show_line_numbers: bool = False,
-) -> List[str]:
-    """Format a list of (line_number, content) tuples.
+    start_number: int = 1,
+    show_numbers: bool = False,
+) -> Iterator[str]:
+    """Yield formatted lines according to the chosen format.
 
     Args:
-        lines: List of (1-based line number, raw line string) tuples.
-        fmt: One of 'plain' or 'json'.
-        timestamps: Optional list of parsed timestamps aligned with *lines*.
-        show_line_numbers: Prefix plain output with line numbers.
-
-    Returns:
-        List of formatted strings (no trailing newlines).
+        lines: Iterable of raw log lines.
+        fmt: Output format — 'plain' or 'json'.
+        start_number: Line number for the first line.
+        show_numbers: Whether to include line numbers.
     """
-    if fmt not in ("plain", "json"):
-        raise ValueError(f"Unknown format: {fmt!r}. Choose 'plain' or 'json'.")
-
-    result = []
-    for idx, (lineno, content) in enumerate(lines):
-        ts = timestamps[idx] if timestamps else None
+    for i, line in enumerate(lines, start=start_number):
+        n = i if show_numbers else None
         if fmt == "json":
-            result.append(format_line_json(content, lineno if show_line_numbers else None, ts))
+            yield format_line_json(line, line_number=n)
         else:
-            result.append(format_line_plain(content.rstrip("\n"), lineno if show_line_numbers else None))
-    return result
+            yield format_line_plain(line, line_number=n)
