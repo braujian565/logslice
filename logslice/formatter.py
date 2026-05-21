@@ -1,115 +1,102 @@
-"""Output formatting for log lines and summaries."""
-
-from __future__ import annotations
+"""Output formatters for logslice results."""
 
 import json
-from typing import Iterable, Iterator, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 
 def format_line_plain(
     line: str,
     line_number: Optional[int] = None,
 ) -> str:
-    """Return a plain-text representation of a log line.
-
-    Args:
-        line: The raw log line (trailing newline stripped).
-        line_number: Optional 1-based line number to prepend.
-
-    Returns:
-        Formatted string ready for output.
-    """
-    line = line.rstrip("\n")
+    """Return a plain-text representation of a log line."""
+    text = line.rstrip("\n")
     if line_number is not None:
-        return f"{line_number:>6}: {line}"
-    return line
+        return f"{line_number}: {text}"
+    return text
 
 
 def format_line_json(
     line: str,
     line_number: Optional[int] = None,
-    extra: Optional[dict] = None,
+    extra: Optional[Dict] = None,
 ) -> str:
-    """Return a JSON-encoded representation of a log line.
-
-    Args:
-        line: The raw log line.
-        line_number: Optional 1-based line number.
-        extra: Optional mapping of additional fields to include.
-
-    Returns:
-        JSON string.
-    """
-    payload: dict = {"line": line.rstrip("\n")}
+    """Return a JSON-encoded representation of a log line."""
+    obj: Dict = {"line": line.rstrip("\n")}
     if line_number is not None:
-        payload["n"] = line_number
+        obj["line_number"] = line_number
     if extra:
-        payload.update(extra)
-    return json.dumps(payload, ensure_ascii=False)
+        obj.update(extra)
+    return json.dumps(obj)
 
 
-def format_summary(
-    total: int,
-    matched: int,
-    label: str = "matched",
-) -> str:
-    """Return a human-readable summary line.
-
-    Args:
-        total: Total lines processed.
-        matched: Lines that passed all filters.
-        label: Verb to use in the summary (default: 'matched').
-
-    Returns:
-        Summary string.
-    """
-    pct = (matched / total * 100) if total else 0.0
-    return f"{matched}/{total} lines {label} ({pct:.1f}%)"
+def format_summary(total: int, matched: int, label: str = "lines") -> str:
+    """Return a human-readable match summary string."""
+    return f"Matched {matched}/{total} {label}"
 
 
 def format_aggregation(
-    aggregated: dict[str, int],
+    counts: Dict[str, int],
     title: str = "Aggregation",
+    max_width: int = 40,
 ) -> str:
-    """Return a formatted table of aggregation results.
-
-    Args:
-        aggregated: Mapping of bucket label -> count.
-        title: Header label for the table.
-
-    Returns:
-        Multi-line string table.
-    """
-    if not aggregated:
-        return f"{title}\n  (no data)"
-
-    max_key = max(len(k) for k in aggregated)
-    max_val = max(len(str(v)) for v in aggregated.values())
-    header = f"{title}"
-    sep = "-" * (max_key + max_val + 5)
-    rows = [header, sep]
-    for key, count in aggregated.items():
-        rows.append(f"  {key:<{max_key}}  {count:>{max_val}d}")
-    return "\n".join(rows)
+    """Render an aggregation dict as a formatted table string."""
+    lines = [f"=== {title} ==="]
+    if not counts:
+        lines.append("  (no data)")
+        return "\n".join(lines)
+    max_val = max(counts.values(), default=1)
+    for key, count in counts.items():
+        bar_len = int((count / max_val) * max_width)
+        bar = "#" * bar_len
+        lines.append(f"  {key:<30} {count:>6}  {bar}")
+    return "\n".join(lines)
 
 
 def format_lines(
-    lines: Iterable[str],
+    lines: List[str],
     fmt: str = "plain",
     start_number: int = 1,
     show_numbers: bool = False,
 ) -> Iterator[str]:
-    """Yield formatted lines according to the chosen format.
+    """Yield formatted versions of each line."""
+    for i, line in enumerate(lines):
+        num = start_number + i if show_numbers else None
+        if fmt == "json":
+            yield format_line_json(line, line_number=num)
+        else:
+            yield format_line_plain(line, line_number=num)
+
+
+def format_context_block(
+    block: List[Tuple[int, str, bool]],
+    fmt: str = "plain",
+    show_numbers: bool = True,
+    match_marker: str = ">",
+    context_marker: str = " ",
+) -> Iterator[str]:
+    """Yield formatted lines for a context block, marking matched vs context lines.
 
     Args:
-        lines: Iterable of raw log lines.
-        fmt: Output format — 'plain' or 'json'.
-        start_number: Line number for the first line.
-        show_numbers: Whether to include line numbers.
+        block: List of (line_index, line_text, is_match) tuples.
+        fmt: Output format, 'plain' or 'json'.
+        show_numbers: Whether to include 1-based line numbers.
+        match_marker: Prefix character for matched lines.
+        context_marker: Prefix character for context-only lines.
     """
-    for i, line in enumerate(lines, start=start_number):
-        n = i if show_numbers else None
+    for idx, text, is_match in block:
+        marker = match_marker if is_match else context_marker
+        line_number = idx + 1 if show_numbers else None
         if fmt == "json":
-            yield format_line_json(line, line_number=n)
+            yield format_line_json(
+                text,
+                line_number=line_number,
+                extra={"is_match": is_match},
+            )
         else:
-            yield format_line_plain(line, line_number=n)
+            num_str = f"{line_number}: " if line_number is not None else ""
+            yield f"{marker} {num_str}{text.rstrip(chr(10))}"
+
+
+def format_context_separator() -> str:
+    """Return the standard separator string between non-adjacent context blocks."""
+    return "--"
