@@ -49,3 +49,8 @@ def colorize(text: str, color: str) -> str:
     """Wrap arbitrary text in the given ANSI color."""
     ansi_start = ANSI_COLORS.get(color, ANSI_COLORS[DEFAULT_HIGHLIGHT_COLOR])
     return f"{ansi_start}{text}{ANSI_RESET}"
+
+
+def available_colors() -> list[str]:
+    """Return a sorted list of valid color names that can be used for highlighting."""
+    return sorted(ANSI_COLORS.keys())
