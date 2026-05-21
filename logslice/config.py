@@ -1,54 +1,78 @@
-"""Configuration dataclass for logslice run options."""
+"""Configuration dataclass for logslice.
 
+Central place for all runtime options so that CLI, library callers, and
+tests share a single source of truth.
+"""
+
+from __future__ import annotations
+
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import IO, Optional
 
 
 @dataclass
 class LogSliceConfig:
-    """Holds all runtime options for a logslice invocation."""
+    """All options that control a logslice run."""
 
-    # Input
-    input_path: str = "-"  # "-" means stdin
+    # I/O
+    input: IO = field(default_factory=lambda: sys.stdin)
+    output: IO = field(default_factory=lambda: sys.stdout)
 
-    # Time range filters
+    # Filtering
+    pattern: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
 
-    # Pattern filter
-    pattern: Optional[str] = None
-    ignore_case: bool = False
-
-    # Output options
-    output_format: str = "plain"       # "plain" | "json"
+    # Output format
+    format: str = "plain"          # "plain" | "json"
     show_line_numbers: bool = False
     highlight: bool = False
     highlight_color: str = "yellow"
 
-    # Behaviour
-    count_only: bool = False
-    max_lines: Optional[int] = None
-
-    # Extra fields reserved for future use
-    extra: dict = field(default_factory=dict)
+    # Sampling  (new)
+    sample_rate: Optional[float] = None   # e.g. 0.1 → keep ~10 %
+    sample_every: Optional[int] = None    # e.g. 10  → keep every 10th line
+    sample_reservoir: Optional[int] = None  # e.g. 500 → reservoir of 500
 
     def is_filtered(self) -> bool:
-        """Return True if any filter is active."""
+        """Return True if any filtering or sampling option is active."""
         return any([
+            self.pattern is not None,
             self.start_time is not None,
             self.end_time is not None,
-            self.pattern is not None,
+            self.sample_rate is not None,
+            self.sample_every is not None,
+            self.sample_reservoir is not None,
         ])
 
     def validate(self) -> None:
-        """Raise ValueError for invalid combinations."""
-        if self.output_format not in ("plain", "json"):
-            raise ValueError(f"Unknown output format: {self.output_format!r}")
+        """Raise ValueError for invalid option combinations."""
+        if self.format not in ("plain", "json"):
+            raise ValueError(f"Unknown format {self.format!r}; expected 'plain' or 'json'")
+
         if self.start_time and self.end_time and self.start_time > self.end_time:
             raise ValueError("start_time must not be later than end_time")
-        if self.max_lines is not None and self.max_lines < 1:
-            raise ValueError("max_lines must be a positive integer")
-        valid_colors = {"red", "green", "yellow", "blue", "magenta", "cyan", "bold"}
-        if self.highlight_color not in valid_colors:
-            raise ValueError(f"Invalid highlight color: {self.highlight_color!r}")
+
+        sampling_opts = [
+            self.sample_rate is not None,
+            self.sample_every is not None,
+            self.sample_reservoir is not None,
+        ]
+        if sum(sampling_opts) > 1:
+            raise ValueError(
+                "Only one sampling option may be specified at a time: "
+                "sample_rate, sample_every, or sample_reservoir."
+            )
+
+        if self.sample_rate is not None and not (0.0 < self.sample_rate <= 1.0):
+            raise ValueError(f"sample_rate must be in (0, 1], got {self.sample_rate!r}")
+
+        if self.sample_every is not None and self.sample_every < 1:
+            raise ValueError(f"sample_every must be >= 1, got {self.sample_every!r}")
+
+        if self.sample_reservoir is not None and self.sample_reservoir < 1:
+            raise ValueError(
+                f"sample_reservoir must be >= 1, got {self.sample_reservoir!r}"
+            )
