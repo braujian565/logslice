@@ -1,78 +1,74 @@
-"""Tests for logslice.pipeline_builder."""
+"""Tests for logslice.pipeline_builder, including redaction stage."""
 
-from datetime import datetime
-from unittest.mock import MagicMock
-
-from logslice.pipeline import run_pipeline
+import sys
+import pytest
+from logslice.config import LogSliceConfig
 from logslice.pipeline_builder import stages_from_config
+from logslice.pipeline import run_pipeline
 
 
-def _cfg(**kwargs):
-    """Create a minimal mock LogSliceConfig with sensible defaults."""
-    cfg = MagicMock()
-    cfg.start_time = kwargs.get("start_time", None)
-    cfg.end_time = kwargs.get("end_time", None)
-    cfg.filters = kwargs.get("filters", [])
-    cfg.exclude_filters = kwargs.get("exclude_filters", [])
-    cfg.skip = kwargs.get("skip", 0)
-    cfg.max_lines = kwargs.get("max_lines", 0)
-    return cfg
-
-
-LINES = [
-    "2024-01-01 10:00:00 INFO  service started",
-    "2024-01-01 10:01:00 ERROR disk full",
-    "2024-01-01 10:02:00 INFO  request ok",
-    "2024-01-01 10:03:00 WARN  high memory",
-    "2024-01-01 10:04:00 ERROR timeout",
-]
+def _cfg(**kwargs) -> LogSliceConfig:
+    return LogSliceConfig(input=sys.stdin, **kwargs)
 
 
 class TestStagesFromConfig:
     def test_no_filters_returns_all(self):
         cfg = _cfg()
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert result == LINES
+        stages = stages_from_config(cfg)
+        lines = ["a", "b", "c"]
+        assert list(run_pipeline(iter(lines), stages)) == lines
 
     def test_include_filter_keeps_matching(self):
-        cfg = _cfg(filters=["ERROR"])
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert all("ERROR" in l for l in result)
-        assert len(result) == 2
+        cfg = _cfg(include=[r"error"])
+        stages = stages_from_config(cfg)
+        lines = ["info ok", "error bad", "warn ok"]
+        assert list(run_pipeline(iter(lines), stages)) == ["error bad"]
 
     def test_exclude_filter_removes_matching(self):
-        cfg = _cfg(exclude_filters=["ERROR"])
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert all("ERROR" not in l for l in result)
-        assert len(result) == 3
+        cfg = _cfg(exclude=[r"debug"])
+        stages = stages_from_config(cfg)
+        lines = ["info ok", "debug noise", "warn ok"]
+        assert list(run_pipeline(iter(lines), stages)) == ["info ok", "warn ok"]
 
-    def test_include_and_exclude_combine(self):
-        cfg = _cfg(filters=["10:0"], exclude_filters=["ERROR"])
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert len(result) == 3
-        assert all("ERROR" not in l for l in result)
+    def test_include_and_exclude_combined(self):
+        cfg = _cfg(include=[r"error"], exclude=[r"ignore"])
+        stages = stages_from_config(cfg)
+        lines = ["error keep", "error ignore this", "info skip"]
+        assert list(run_pipeline(iter(lines), stages)) == ["error keep"]
 
-    def test_max_lines_limits_output(self):
-        cfg = _cfg(max_lines=2)
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert result == LINES[:2]
+    def test_redact_single_pattern(self):
+        cfg = _cfg(redact=[r"\d+"])
+        stages = stages_from_config(cfg)
+        lines = ["user 42 logged in", "no digits here"]
+        result = list(run_pipeline(iter(lines), stages))
+        assert result == ["user [REDACTED] logged in", "no digits here"]
 
-    def test_skip_removes_first_n(self):
-        cfg = _cfg(skip=2)
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert result == LINES[2:]
+    def test_redact_preset_ipv4(self):
+        cfg = _cfg(redact=["ipv4"])
+        stages = stages_from_config(cfg)
+        lines = ["connect from 10.0.0.1", "no ip"]
+        result = list(run_pipeline(iter(lines), stages))
+        assert "10.0.0.1" not in result[0]
+        assert result[1] == "no ip"
 
-    def test_skip_and_limit_combine(self):
-        cfg = _cfg(skip=1, max_lines=2)
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert result == LINES[1:3]
+    def test_redact_custom_replacement(self):
+        cfg = _cfg(redact=[r"secret"], redact_replacement="***")
+        stages = stages_from_config(cfg)
+        lines = ["my secret key"]
+        result = list(run_pipeline(iter(lines), stages))
+        assert result == ["my *** key"]
 
-    def test_zero_skip_and_limit_ignored(self):
-        cfg = _cfg(skip=0, max_lines=0)
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert result == LINES
+    def test_redact_applied_after_include_filter(self):
+        """Redaction should only see lines that passed the include filter."""
+        cfg = _cfg(include=[r"error"], redact=[r"\d+"])
+        stages = stages_from_config(cfg)
+        lines = ["info 123", "error 456"]
+        result = list(run_pipeline(iter(lines), stages))
+        assert result == ["error [REDACTED]"]
 
-    def test_multiple_include_filters_narrow_results(self):
-        cfg = _cfg(filters=["ERROR", "disk"])
-        result = list(run_pipeline(LINES, stages_from_config(cfg)))
-        assert result == ["2024-01-01 10:01:00 ERROR disk full"]
+    def test_no_redact_stage_when_redact_empty(self):
+        cfg = _cfg(redact=[])
+        stages = stages_from_config(cfg)
+        # No redaction stage means digit lines pass through unchanged
+        lines = ["value 99"]
+        assert list(run_pipeline(iter(lines), stages)) == ["value 99"]

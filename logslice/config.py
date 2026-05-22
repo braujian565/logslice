@@ -1,78 +1,67 @@
-"""Configuration dataclass for logslice.
-
-Central place for all runtime options so that CLI, library callers, and
-tests share a single source of truth.
-"""
+"""Configuration dataclass for logslice."""
 
 from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import IO, Optional
+from typing import IO, List, Optional
 
 
 @dataclass
 class LogSliceConfig:
-    """All options that control a logslice run."""
-
-    # I/O
+    # Input
     input: IO = field(default_factory=lambda: sys.stdin)
-    output: IO = field(default_factory=lambda: sys.stdout)
+    input_path: Optional[str] = None
 
     # Filtering
-    pattern: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    include: List[str] = field(default_factory=list)
+    exclude: List[str] = field(default_factory=list)
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
 
-    # Output format
-    format: str = "plain"          # "plain" | "json"
-    show_line_numbers: bool = False
+    # Output
+    format: str = "plain"  # plain | json
+    output: IO = field(default_factory=lambda: sys.stdout)
+    output_path: Optional[str] = None
+
+    # Display
     highlight: bool = False
     highlight_color: str = "yellow"
+    line_numbers: bool = False
+    context_before: int = 0
+    context_after: int = 0
 
-    # Sampling  (new)
-    sample_rate: Optional[float] = None   # e.g. 0.1 → keep ~10 %
-    sample_every: Optional[int] = None    # e.g. 10  → keep every 10th line
-    sample_reservoir: Optional[int] = None  # e.g. 500 → reservoir of 500
+    # Sampling / dedup
+    sample_rate: Optional[float] = None
+    deduplicate: bool = False
+
+    # Tail / watch
+    tail: Optional[int] = None
+    follow: bool = False
+
+    # Redaction
+    redact: List[str] = field(default_factory=list)
+    redact_replacement: str = "[REDACTED]"
 
     def is_filtered(self) -> bool:
-        """Return True if any filtering or sampling option is active."""
-        return any([
-            self.pattern is not None,
-            self.start_time is not None,
-            self.end_time is not None,
-            self.sample_rate is not None,
-            self.sample_every is not None,
-            self.sample_reservoir is not None,
-        ])
+        return bool(
+            self.include
+            or self.exclude
+            or self.start_time
+            or self.end_time
+        )
 
     def validate(self) -> None:
-        """Raise ValueError for invalid option combinations."""
-        if self.format not in ("plain", "json"):
-            raise ValueError(f"Unknown format {self.format!r}; expected 'plain' or 'json'")
-
-        if self.start_time and self.end_time and self.start_time > self.end_time:
-            raise ValueError("start_time must not be later than end_time")
-
-        sampling_opts = [
-            self.sample_rate is not None,
-            self.sample_every is not None,
-            self.sample_reservoir is not None,
-        ]
-        if sum(sampling_opts) > 1:
+        allowed_formats = {"plain", "json"}
+        if self.format not in allowed_formats:
             raise ValueError(
-                "Only one sampling option may be specified at a time: "
-                "sample_rate, sample_every, or sample_reservoir."
+                f"format must be one of {allowed_formats}, got {self.format!r}"
             )
-
-        if self.sample_rate is not None and not (0.0 < self.sample_rate <= 1.0):
-            raise ValueError(f"sample_rate must be in (0, 1], got {self.sample_rate!r}")
-
-        if self.sample_every is not None and self.sample_every < 1:
-            raise ValueError(f"sample_every must be >= 1, got {self.sample_every!r}")
-
-        if self.sample_reservoir is not None and self.sample_reservoir < 1:
-            raise ValueError(
-                f"sample_reservoir must be >= 1, got {self.sample_reservoir!r}"
-            )
+        if self.sample_rate is not None and not (0 < self.sample_rate <= 1):
+            raise ValueError("sample_rate must be in (0, 1]")
+        if self.context_before < 0:
+            raise ValueError("context_before must be >= 0")
+        if self.context_after < 0:
+            raise ValueError("context_after must be >= 0")
+        if self.tail is not None and self.tail < 0:
+            raise ValueError("tail must be >= 0")
