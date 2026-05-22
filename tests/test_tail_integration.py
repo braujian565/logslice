@@ -55,3 +55,14 @@ def test_large_file_tail_lines(tmp_path):
     assert len(result) == 10
     assert result[-1] == "line 04999"
     assert result[0] == "line 04990"
+
+
+def test_tail_lines_n_exceeds_file_length(tmp_path):
+    """tail_lines returns all lines when n is greater than the total line count."""
+    p = tmp_path / "short.log"
+    p.write_text(_SAMPLE + "\n")
+
+    result = tail_lines(str(p), n=100)
+    assert len(result) == 5
+    assert result[0] == "2024-01-01T00:00:01 INFO  server started"
+    assert result[-1] == "2024-01-01T00:00:05 INFO  recovered"
