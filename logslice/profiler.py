@@ -39,6 +39,15 @@ class ProfileResult:
             "avg_line_bytes": round(self.avg_line_bytes, 2),
         }
 
+    def __str__(self) -> str:
+        """Return a human-readable summary of the profile result."""
+        return (
+            f"ProfileResult: {self.total_lines} lines, "
+            f"{self.bytes_processed} bytes in {self.elapsed_seconds:.6f}s "
+            f"({self.lines_per_second:.2f} lines/s, "
+            f"{self.bytes_per_second:.2f} bytes/s)"
+        )
+
 
 def profile_lines(
     lines: Iterable[str],
