@@ -76,9 +76,15 @@ def merge_files(
 
     Yields:
         Merged log lines in chronological order.
+
+    Raises:
+        FileNotFoundError: If any of the given paths do not exist.
+        PermissionError: If any of the given paths cannot be opened for reading.
     """
-    handles = [open(p, "r", encoding=encoding) for p in paths]
+    handles = []
     try:
+        for p in paths:
+            handles.append(open(p, "r", encoding=encoding))
         yield from merge_logs(
             [h for h in handles],
             deduplicate=deduplicate,
