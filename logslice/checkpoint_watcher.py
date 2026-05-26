@@ -14,6 +14,13 @@ from logslice.config import LogSliceConfig
 from logslice.pipeline_builder import stages_from_config
 from logslice.pipeline import run_pipeline
 
+_DEFAULT_POLL_INTERVAL = 0.25
+
+
+def _poll_interval(cfg: LogSliceConfig) -> float:
+    """Return the polling interval from *cfg*, falling back to a safe default."""
+    return getattr(cfg, "poll_interval", _DEFAULT_POLL_INTERVAL)
+
 
 def resume_and_watch(
     log_path: str,
@@ -53,4 +60,4 @@ def resume_and_watch(
                     yield fl
                 save_checkpoint(log_path, fh.tell(), checkpoint_dir)
             else:
-                time.sleep(cfg.poll_interval if hasattr(cfg, "poll_interval") else 0.25)
+                time.sleep(_poll_interval(cfg))
